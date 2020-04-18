@@ -16,9 +16,6 @@ type Processor struct {
 	SourceFunc        func() chan interface{}
 	SourceFuncInvoked bool
 
-	ConsumersFunc        func() []pipelines.Processor
-	ConsumersFuncInvoked bool
-
 	ProcessFunc        func(interface{}) (interface{}, error)
 	ProcessFuncInvoked bool
 
@@ -31,11 +28,6 @@ func (p *Processor) Source() chan interface{} {
 	return p.SourceFunc()
 }
 
-func (p *Processor) Consumers() []pipelines.Processor {
-	p.ConsumersFuncInvoked = true
-	return p.ConsumersFunc()
-}
-
 func (p *Processor) Process(i interface{}) (interface{}, error) {
 	p.ProcessFuncInvoked = true
 	return p.ProcessFunc(i)
@@ -46,13 +38,10 @@ func (p *Processor) Exit() {
 	p.ExitFunc()
 }
 
-func createTestProcesser(source chan interface{}, consumers []pipelines.Processor) *Processor {
+func createTestProcesser(source chan interface{}) *Processor {
 	return &Processor{
 		SourceFunc: func() chan interface{} {
 			return source
-		},
-		ConsumersFunc: func() []pipelines.Processor {
-			return consumers
 		},
 		ProcessFunc: func(i interface{}) (interface{}, error) {
 			switch i.(type) {
@@ -69,11 +58,10 @@ func createTestProcesser(source chan interface{}, consumers []pipelines.Processo
 func TestPipelineGraphSingle(t *testing.T) {
 	source := make(chan interface{})
 
-	proc := createTestProcesser(source, nil)
+	proc := createTestProcesser(source)
 
-	pipeline := pipelines.Pipeline{
-		Processes: []pipelines.Processor{proc},
-	}
+	pipeline := pipelines.New()
+	pipeline.Process(proc)
 
 	graph, err := pipeline.Graph()
 	assert.NoError(t, err)
@@ -90,14 +78,16 @@ func TestPipelineGraphSimple(t *testing.T) {
 	sourceC := make(chan interface{})
 	sourceD := make(chan interface{})
 
-	procD := createTestProcesser(sourceD, nil)
-	procC := createTestProcesser(sourceC, []pipelines.Processor{procD})
-	procB := createTestProcesser(sourceB, []pipelines.Processor{procC})
-	procA := createTestProcesser(sourceA, []pipelines.Processor{procB})
+	procD := createTestProcesser(sourceD)
+	procC := createTestProcesser(sourceC)
+	procB := createTestProcesser(sourceB)
+	procA := createTestProcesser(sourceA)
 
-	pipeline := pipelines.Pipeline{
-		Processes: []pipelines.Processor{procA},
-	}
+	pipeline := pipelines.New()
+
+	pipeline.Process(procB).Consumes(procA)
+	pipeline.Process(procC).Consumes(procB)
+	pipeline.Process(procD).Consumes(procC)
 
 	expected := map[pipelines.Processor]int{
 		procA: 0,
@@ -108,6 +98,7 @@ func TestPipelineGraphSimple(t *testing.T) {
 	graph, err := pipeline.Graph()
 	assert.NoError(t, err)
 
+	t.Log(graph)
 	for k, v := range graph {
 		expect, ok := expected[k]
 		assert.Truef(t, ok, "Unknown processor %q", k)
@@ -122,15 +113,17 @@ func TestPipelineGraphComplex(t *testing.T) {
 	sourceC := make(chan interface{})
 	sourceD := make(chan interface{})
 
-	procC := createTestProcesser(sourceC, nil)
-	procD := createTestProcesser(sourceD, []pipelines.Processor{procC})
+	procC := createTestProcesser(sourceC)
+	procD := createTestProcesser(sourceD)
 
-	procB := createTestProcesser(sourceB, []pipelines.Processor{procC})
-	procA := createTestProcesser(sourceA, []pipelines.Processor{procB})
+	procB := createTestProcesser(sourceB)
+	procA := createTestProcesser(sourceA)
 
-	pipeline := pipelines.Pipeline{
-		Processes: []pipelines.Processor{procA, procD},
-	}
+	pipeline := pipelines.New()
+
+	pipeline.Process(procB).Consumes(procA)
+	pipeline.Process(procC).Consumes(procB)
+	pipeline.Process(procC).Consumes(procD)
 
 	expected := map[pipelines.Processor]int{
 		procA: 0,
@@ -141,10 +134,11 @@ func TestPipelineGraphComplex(t *testing.T) {
 	graph, err := pipeline.Graph()
 	assert.NoError(t, err)
 
+	t.Log(graph)
 	for k, v := range graph {
 		expect, ok := expected[k]
-		assert.Truef(t, ok, "Unknown processor %q", k)
-		assert.Equalf(t, expect, v, "Values do not match. Got %q but expected %q at key %q", v, expect, k)
+		assert.Truef(t, ok, "Unknown processor %v", k)
+		assert.Equalf(t, expect, v, "Values do not match. Got %v but expected %v at key %v", v, expect, k)
 	}
 }
 
@@ -154,32 +148,35 @@ func TestPipelineGraphCycle(t *testing.T) {
 	sourceB := make(chan interface{})
 	sourceC := make(chan interface{})
 
-	procC := createTestProcesser(sourceC, nil)
-	procB := createTestProcesser(sourceB, []pipelines.Processor{procC})
-	procA := createTestProcesser(sourceA, []pipelines.Processor{procB})
+	procC := createTestProcesser(sourceC)
+	procB := createTestProcesser(sourceB)
+	procA := createTestProcesser(sourceA)
 
-	// reassign to create a cycle
-	procC.ConsumersFunc = func() []pipelines.Processor {
-		return []pipelines.Processor{procB}
-	}
+	pipeline := pipelines.New()
 
-	pipeline := pipelines.Pipeline{
-		Processes: []pipelines.Processor{procA, procB, procC},
-	}
+	pipeline.Process(procB).Consumes(procA)
+	pipeline.Process(procC).Consumes(procB)
+	pipeline.Process(procB).Consumes(procC)
 
 	g, err := pipeline.Graph()
 	t.Log(g)
 	assert.Error(t, err, "Graph should fail on a cycle")
 }
 
+func TestPipelineRunEmpty(t *testing.T) {
+	pipeline := pipelines.New()
+
+	err := pipeline.Run()
+	assert.Error(t, err)
+}
+
 func TestPipelineRunSingleProccessor(t *testing.T) {
 	source := make(chan interface{})
 
-	proc := createTestProcesser(source, nil)
+	proc := createTestProcesser(source)
 
-	pipeline := pipelines.Pipeline{
-		Processes: []pipelines.Processor{proc},
-	}
+	pipeline := pipelines.New()
+	pipeline.Process(proc).Consumes()
 
 	err := pipeline.Run()
 	assert.NoError(t, err)
@@ -198,15 +195,17 @@ func TestPipelineRunManyProccessors(t *testing.T) {
 	sourceC := make(chan interface{})
 	sourceD := make(chan interface{})
 
-	procC := createTestProcesser(sourceC, nil)
-	procD := createTestProcesser(sourceD, []pipelines.Processor{procC})
+	procC := createTestProcesser(sourceC)
+	procD := createTestProcesser(sourceD)
 
-	procB := createTestProcesser(sourceB, []pipelines.Processor{procC})
-	procA := createTestProcesser(sourceA, []pipelines.Processor{procB})
+	procB := createTestProcesser(sourceB)
+	procA := createTestProcesser(sourceA)
 
-	pipeline := pipelines.Pipeline{
-		Processes: []pipelines.Processor{procA, procD},
-	}
+	pipeline := pipelines.New()
+
+	pipeline.Process(procB).Consumes(procA)
+	pipeline.Process(procC).Consumes(procB)
+	pipeline.Process(procC).Consumes(procD)
 
 	err := pipeline.Run()
 	assert.NoError(t, err)
@@ -241,11 +240,10 @@ func TestPipelineRunManyProccessors(t *testing.T) {
 func TestPipelineShutdownsSingleProcessor(t *testing.T) {
 	source := make(chan interface{})
 
-	proc := createTestProcesser(source, nil)
+	proc := createTestProcesser(source)
 
-	pipeline := pipelines.Pipeline{
-		Processes: []pipelines.Processor{proc},
-	}
+	pipeline := pipelines.New()
+	pipeline.Process(proc).Consumes()
 
 	err := pipeline.Run()
 	assert.NoError(t, err)
@@ -262,15 +260,16 @@ func TestPipelineShutdownsManyProcessors(t *testing.T) {
 	sourceC := make(chan interface{})
 	sourceD := make(chan interface{})
 
-	procC := createTestProcesser(sourceC, nil)
-	procD := createTestProcesser(sourceD, []pipelines.Processor{procC})
+	procC := createTestProcesser(sourceC)
+	procD := createTestProcesser(sourceD)
 
-	procB := createTestProcesser(sourceB, []pipelines.Processor{procC})
-	procA := createTestProcesser(sourceA, []pipelines.Processor{procB})
+	procB := createTestProcesser(sourceB)
+	procA := createTestProcesser(sourceA)
 
-	pipeline := pipelines.Pipeline{
-		Processes: []pipelines.Processor{procA, procD},
-	}
+	pipeline := pipelines.New()
+	pipeline.Process(procB).Consumes(procA)
+	pipeline.Process(procC).Consumes(procB)
+	pipeline.Process(procC).Consumes(procD)
 
 	err := pipeline.Run()
 	assert.NoError(t, err)
@@ -294,14 +293,15 @@ func TestPipelineRunIgnoresEmptyEvents(t *testing.T) {
 	sourceC := make(chan interface{})
 	sourceD := make(chan interface{})
 
-	procD := createTestProcesser(sourceD, nil)
-	procC := createTestProcesser(sourceC, []pipelines.Processor{procD})
-	procB := createTestProcesser(sourceB, []pipelines.Processor{procC})
-	procA := createTestProcesser(sourceA, []pipelines.Processor{procB})
+	procD := createTestProcesser(sourceD)
+	procC := createTestProcesser(sourceC)
+	procB := createTestProcesser(sourceB)
+	procA := createTestProcesser(sourceA)
 
-	pipeline := pipelines.Pipeline{
-		Processes: []pipelines.Processor{procA},
-	}
+	pipeline := pipelines.New()
+	pipeline.Process(procB).Consumes(procA)
+	pipeline.Process(procC).Consumes(procB)
+	pipeline.Process(procD).Consumes(procC)
 
 	err := pipeline.Run()
 	assert.NoError(t, err)
@@ -326,14 +326,16 @@ func TestPipelineRunIgnoresErrors(t *testing.T) {
 	sourceC := make(chan interface{})
 	sourceD := make(chan interface{})
 
-	procD := createTestProcesser(sourceD, nil)
-	procC := createTestProcesser(sourceC, []pipelines.Processor{procD})
-	procB := createTestProcesser(sourceB, []pipelines.Processor{procC})
-	procA := createTestProcesser(sourceA, []pipelines.Processor{procB})
+	procD := createTestProcesser(sourceD)
+	procC := createTestProcesser(sourceC)
+	procB := createTestProcesser(sourceB)
+	procA := createTestProcesser(sourceA)
 
-	pipeline := pipelines.Pipeline{
-		Processes: []pipelines.Processor{procA},
-	}
+	pipeline := pipelines.New()
+
+	pipeline.Process(procB).Consumes(procA)
+	pipeline.Process(procC).Consumes(procB)
+	pipeline.Process(procD).Consumes(procC)
 
 	err := pipeline.Run()
 	assert.NoError(t, err)

@@ -7,12 +7,37 @@ import (
 	"sync"
 )
 
-// Processor defines a process' input (Source) channel, its Consumers that care about its Process output, and an Exit handler for when the process is shutdown.
+// Processor defines a process' input (Source) channel, its process function, and an exit handler.
 type Processor interface {
 	Source() chan interface{}
-	Consumers() []Processor
 	Process(interface{}) (interface{}, error)
 	Exit()
+}
+
+type pipelineProcess struct {
+	proc      Processor
+	pipeline  *pipeline
+	consumers []Processor
+}
+
+func (pp *pipelineProcess) addConsumer(proc Processor) {
+	consumers := pp.pipeline.Process(proc).consumers
+	pp.pipeline.Process(proc).consumers = append(consumers, pp.proc)
+}
+
+func (pp *pipelineProcess) Consumes(others ...Processor) {
+	for _, proc := range others {
+		pp.addConsumer(proc)
+	}
+}
+
+type pipelineProcesses []*pipelineProcess
+
+func (pps pipelineProcesses) Consumes(others ...Processor) {
+	// Add p's source channel as a consumer of the other processes
+	for _, p := range pps {
+		p.Consumes(others...)
+	}
 }
 
 // processGroup contains information to run and shutdown a group of Processors
@@ -23,17 +48,51 @@ type processGroup struct {
 }
 
 // Pipeline contains a slice of Processors and a grouping to gracefully shutdown all of its Processors
-type Pipeline struct {
-	Processes []Processor
+type pipeline struct {
+	processes map[Processor]*pipelineProcess
 	groups    []*processGroup
+}
+
+func New() *pipeline {
+	processes := map[Processor]*pipelineProcess{}
+
+	return &pipeline{
+		processes: processes,
+	}
+}
+
+func (p *pipeline) Process(source Processor) *pipelineProcess {
+	pp, ok := p.processes[source]
+
+	// if it exists, return the pipeline process
+	if ok {
+		return pp
+	}
+
+	// else create it
+	pp = &pipelineProcess{
+		proc:     source,
+		pipeline: p,
+	}
+	p.processes[source] = pp
+
+	return pp
+}
+
+func (p *pipeline) Processeses(sources ...Processor) pipelineProcesses {
+	pps := pipelineProcesses{}
+	for _, s := range sources {
+		pps = append(pps, p.Process(s))
+	}
+	return pps
 }
 
 // Graph returns a mapping from Processor to its maximum depth in any Process DAG (tree).
 // This graph representation of the pipeline is used to a graceful shutdown of every Processor.
-func (p *Pipeline) Graph() (map[Processor]int, error) {
+func (p *pipeline) Graph() (map[Processor]int, error) {
 	graph := map[Processor]int{}
 
-	for _, proc := range p.Processes {
+	for proc, _ := range p.processes {
 		visited := map[Processor]bool{}
 
 		err := p.addGraphNode(proc, 0, graph, visited)
@@ -49,11 +108,15 @@ func (p *Pipeline) Graph() (map[Processor]int, error) {
 // are assigned to each processes according to its depth in the graph.
 // Each process is run in its own go routine.
 // An error is returned if there is a cycle detected in the pipeline graph (DAGs).
-func (p *Pipeline) Run() error {
+func (p *pipeline) Run() error {
 	graph, err := p.Graph()
 
 	if err != nil {
 		return err
+	}
+
+	if len(graph) == 0 {
+		return fmt.Errorf("no processes to run")
 	}
 
 	// find the max depth of the procedure graph
@@ -82,7 +145,8 @@ func (p *Pipeline) Run() error {
 		pg.WG.Add(len(procs))
 
 		for _, proc := range procs {
-			go runProc(pg.Ctx, pg.WG, proc)
+			consumers := p.Process(proc).consumers
+			go runProc(pg.Ctx, pg.WG, proc, consumers)
 		}
 	}
 
@@ -91,7 +155,7 @@ func (p *Pipeline) Run() error {
 
 // Shutdown gracefully shutdowns a pipeline in order of proccess groups.
 // Root processes will be shutdown first, then their consumers in a BFS order.
-func (p *Pipeline) Shutdown() {
+func (p *pipeline) Shutdown() {
 	if len(p.groups) == 0 {
 		log.Println("Pipeline is not running")
 		return
@@ -109,7 +173,7 @@ func (p *Pipeline) Shutdown() {
 
 // addGraphNode recursively mutates the graph (map[Processor]int) mapping a Processor to its maximum depth
 // in a Processes tree (DAG).
-func (p *Pipeline) addGraphNode(proc Processor, depth int, graph map[Processor]int, visited map[Processor]bool) error {
+func (p *pipeline) addGraphNode(proc Processor, depth int, graph map[Processor]int, visited map[Processor]bool) error {
 	_, isCycle := visited[proc]
 
 	if isCycle {
@@ -127,7 +191,7 @@ func (p *Pipeline) addGraphNode(proc Processor, depth int, graph map[Processor]i
 		graph[proc] = depth
 	}
 
-	for _, c := range proc.Consumers() {
+	for _, c := range p.Process(proc).consumers {
 		// copy the visited map for each consumer
 		visitCopy := map[Processor]bool{}
 		for k, v := range visited {
@@ -145,7 +209,7 @@ func (p *Pipeline) addGraphNode(proc Processor, depth int, graph map[Processor]i
 // runProc runs a Processor Until it receives a cancellation signal from its context.
 // While running, a Processor processes all events that comes through its Source and sends the processed output to its consumers.
 // On cancellation, the Processor's Exit handler is called before closing its Source.
-func runProc(ctx context.Context, wg *sync.WaitGroup, p Processor) {
+func runProc(ctx context.Context, wg *sync.WaitGroup, p Processor, consumers []Processor) {
 	defer wg.Done()
 	for {
 		select {
@@ -163,7 +227,7 @@ func runProc(ctx context.Context, wg *sync.WaitGroup, p Processor) {
 				continue
 			}
 
-			for _, c := range p.Consumers() {
+			for _, c := range consumers {
 				c.Source() <- out
 			}
 
