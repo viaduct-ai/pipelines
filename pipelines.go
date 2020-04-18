@@ -14,29 +14,40 @@ type Processor interface {
 	Exit()
 }
 
-type pipelineProcess struct {
-	proc      Processor
+type processNode struct {
 	pipeline  *pipeline
+	proc      Processor
 	consumers []Processor
+	depth     int
 }
 
-func (pp *pipelineProcess) addConsumer(proc Processor) {
-	consumers := pp.pipeline.Process(proc).consumers
-	pp.pipeline.Process(proc).consumers = append(consumers, pp.proc)
+// Consumer provides read-only access to a pipeline processes consumers
+func (node *processNode) Consumers() []Processor {
+	return node.consumers
 }
 
-func (pp *pipelineProcess) Consumes(others ...Processor) {
+// Depth provides read-only access to a pipeline process' graph depth
+func (node *processNode) Depth() int {
+	return node.depth
+}
+
+func (node *processNode) addConsumer(proc Processor) {
+	consumers := node.pipeline.Process(proc).consumers
+	node.pipeline.Process(proc).consumers = append(consumers, node.proc)
+}
+
+func (node *processNode) Consumes(others ...Processor) {
 	for _, proc := range others {
-		pp.addConsumer(proc)
+		node.addConsumer(proc)
 	}
 }
 
-type pipelineProcesses []*pipelineProcess
+type processNodes []*processNode
 
-func (pps pipelineProcesses) Consumes(others ...Processor) {
+func (nodes processNodes) Consumes(others ...Processor) {
 	// Add p's source channel as a consumer of the other processes
-	for _, p := range pps {
-		p.Consumes(others...)
+	for _, node := range nodes {
+		node.Consumes(others...)
 	}
 }
 
@@ -49,59 +60,58 @@ type processGroup struct {
 
 // Pipeline contains a slice of Processors and a grouping to gracefully shutdown all of its Processors
 type pipeline struct {
-	processes map[Processor]*pipelineProcess
+	processes map[Processor]*processNode
 	groups    []*processGroup
 }
 
 func New() *pipeline {
-	processes := map[Processor]*pipelineProcess{}
+	processes := map[Processor]*processNode{}
 
 	return &pipeline{
 		processes: processes,
 	}
 }
 
-func (p *pipeline) Process(source Processor) *pipelineProcess {
-	pp, ok := p.processes[source]
+func (p *pipeline) Process(source Processor) *processNode {
+	node, ok := p.processes[source]
 
 	// if it exists, return the pipeline process
 	if ok {
-		return pp
+		return node
 	}
 
 	// else create it
-	pp = &pipelineProcess{
+	node = &processNode{
 		proc:     source,
 		pipeline: p,
 	}
-	p.processes[source] = pp
+	p.processes[source] = node
 
-	return pp
+	return node
 }
 
-func (p *pipeline) Processeses(sources ...Processor) pipelineProcesses {
-	pps := pipelineProcesses{}
+func (p *pipeline) Processeses(sources ...Processor) processNodes {
+	nodes := processNodes{}
 	for _, s := range sources {
-		pps = append(pps, p.Process(s))
+		nodes = append(nodes, p.Process(s))
 	}
-	return pps
+	return nodes
 }
 
 // Graph returns a mapping from Processor to its maximum depth in any Process DAG (tree).
 // This graph representation of the pipeline is used to a graceful shutdown of every Processor.
-func (p *pipeline) Graph() (map[Processor]int, error) {
-	graph := map[Processor]int{}
-
+func (p *pipeline) Graph() (map[Processor]*processNode, error) {
 	for proc, _ := range p.processes {
 		visited := map[Processor]bool{}
 
-		err := p.addGraphNode(proc, 0, graph, visited)
+		err := p.addGraphNode(proc, 0, visited)
+
 		if err != nil {
-			return graph, err
+			return p.processes, err
 		}
 	}
 
-	return graph, nil
+	return p.processes, nil
 }
 
 // Run every process in order of its process group. Processes groups
@@ -121,32 +131,31 @@ func (p *pipeline) Run() error {
 
 	// find the max depth of the procedure graph
 	maxDepth := 0
-	for _, d := range graph {
-		if d > maxDepth {
-			maxDepth = d
+	for _, node := range graph {
+		if node.depth > maxDepth {
+			maxDepth = node.depth
 		}
 	}
 
 	// create run order and validate there are no unknown processes
 	// procedure depth
-	l := make([][]Processor, maxDepth+1)
+	nodeGroups := make([]processNodes, maxDepth+1)
 
-	for proc, depth := range graph {
-		l[depth] = append(l[depth], proc)
+	for _, node := range graph {
+		nodeGroups[node.depth] = append(nodeGroups[node.depth], node)
 	}
 
-	for _, procs := range l {
+	for _, nodes := range nodeGroups {
 		// create procedure group
 		pg := newProcessGroup(context.Background())
 
 		// save the pg
 		p.groups = append(p.groups, pg)
 
-		pg.WG.Add(len(procs))
+		pg.WG.Add(len(nodes))
 
-		for _, proc := range procs {
-			consumers := p.Process(proc).consumers
-			go runProc(pg.Ctx, pg.WG, proc, consumers)
+		for _, node := range nodes {
+			go runProc(pg.Ctx, pg.WG, node.proc, node.consumers)
 		}
 	}
 
@@ -173,32 +182,31 @@ func (p *pipeline) Shutdown() {
 
 // addGraphNode recursively mutates the graph (map[Processor]int) mapping a Processor to its maximum depth
 // in a Processes tree (DAG).
-func (p *pipeline) addGraphNode(proc Processor, depth int, graph map[Processor]int, visited map[Processor]bool) error {
+func (p *pipeline) addGraphNode(proc Processor, depth int, visited map[Processor]bool) error {
 	_, isCycle := visited[proc]
 
 	if isCycle {
-		return fmt.Errorf("Cycle found for %v: %v %v", proc, graph, visited)
+		return fmt.Errorf("Cycle found for %v: %v %v", proc, p.processes, visited)
 	}
 
 	// mark as visited
 	visited[proc] = true
 
-	curDepth, ok := graph[proc]
+	node := p.Process(proc)
 
-	// First time visiting, initialize
-	// Or we are at a greater depth  than before
-	if !ok || depth > curDepth {
-		graph[proc] = depth
+	// if we  are at a greater depth than before
+	if depth > node.depth {
+		node.depth = depth
 	}
 
-	for _, c := range p.Process(proc).consumers {
+	for _, c := range node.consumers {
 		// copy the visited map for each consumer
 		visitCopy := map[Processor]bool{}
 		for k, v := range visited {
 			visitCopy[k] = v
 		}
 
-		err := p.addGraphNode(c, depth+1, graph, visitCopy)
+		err := p.addGraphNode(c, depth+1, visitCopy)
 		if err != nil {
 			return err
 		}

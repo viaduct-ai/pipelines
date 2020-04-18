@@ -66,9 +66,11 @@ func TestPipelineGraphSingle(t *testing.T) {
 	graph, err := pipeline.Graph()
 	assert.NoError(t, err)
 
-	depth, ok := graph[proc]
+	node, ok := graph[proc]
+
 	assert.True(t, ok, "Graph is missing the processor")
-	assert.Equal(t, 0, depth, "Depth for a single node graph should be 0")
+	assert.Equal(t, 0, node.Depth(), "Depth for a single node graph should be 0")
+	assert.Equal(t, []pipelines.Processor(nil), node.Consumers(), "Depth for a single node graph should be 0")
 }
 
 // A -> B -> C -> D
@@ -89,20 +91,30 @@ func TestPipelineGraphSimple(t *testing.T) {
 	pipeline.Process(procC).Consumes(procB)
 	pipeline.Process(procD).Consumes(procC)
 
-	expected := map[pipelines.Processor]int{
+	expectedDepth := map[pipelines.Processor]int{
 		procA: 0,
 		procB: 1,
 		procC: 2,
 		procD: 3,
 	}
+	expectedConsumer := map[pipelines.Processor][]pipelines.Processor{
+		procA: []pipelines.Processor{procB},
+		procB: []pipelines.Processor{procC},
+		procC: []pipelines.Processor{procD},
+		procD: []pipelines.Processor(nil),
+	}
+
 	graph, err := pipeline.Graph()
 	assert.NoError(t, err)
 
-	t.Log(graph)
-	for k, v := range graph {
-		expect, ok := expected[k]
-		assert.Truef(t, ok, "Unknown processor %q", k)
-		assert.Equalf(t, expect, v, "Values do not match. Got %q but expected %q at key %q", v, expect, k)
+	for k, node := range graph {
+		depth, ok := expectedDepth[k]
+		assert.Truef(t, ok, "Unknown processor %v", k)
+		assert.Equalf(t, depth, node.Depth(), "Values do not match. Got %q but expected %q at key %q", node.Depth(), depth, k)
+
+		consumers, ok := expectedConsumer[k]
+		assert.Truef(t, ok, "Unknown processor %v", k)
+		assert.Equalf(t, consumers, node.Consumers(), "Values do not match. Got %q but expected %q at key %q", node.Consumers(), consumers, k)
 	}
 }
 
@@ -125,20 +137,30 @@ func TestPipelineGraphComplex(t *testing.T) {
 	pipeline.Process(procC).Consumes(procB)
 	pipeline.Process(procC).Consumes(procD)
 
-	expected := map[pipelines.Processor]int{
+	expectedDepth := map[pipelines.Processor]int{
 		procA: 0,
 		procB: 1,
 		procC: 2,
 		procD: 0,
 	}
+	expectedConsumer := map[pipelines.Processor][]pipelines.Processor{
+		procA: []pipelines.Processor{procB},
+		procB: []pipelines.Processor{procC},
+		procC: []pipelines.Processor(nil),
+		procD: []pipelines.Processor{procC},
+	}
+
 	graph, err := pipeline.Graph()
 	assert.NoError(t, err)
 
-	t.Log(graph)
-	for k, v := range graph {
-		expect, ok := expected[k]
+	for k, node := range graph {
+		depth, ok := expectedDepth[k]
 		assert.Truef(t, ok, "Unknown processor %v", k)
-		assert.Equalf(t, expect, v, "Values do not match. Got %v but expected %v at key %v", v, expect, k)
+		assert.Equalf(t, depth, node.Depth(), "Values do not match. Got %q but expected %q at key %q", node.Depth(), depth, k)
+
+		consumers, ok := expectedConsumer[k]
+		assert.Truef(t, ok, "Unknown processor %v", k)
+		assert.Equalf(t, consumers, node.Consumers(), "Values do not match. Got %q but expected %q at key %q", node.Consumers(), consumers, k)
 	}
 }
 
