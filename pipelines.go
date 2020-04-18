@@ -90,7 +90,7 @@ func (p *pipeline) Process(source Processor) *processNode {
 	return node
 }
 
-func (p *pipeline) Processeses(sources ...Processor) processNodes {
+func (p *pipeline) Processes(sources ...Processor) processNodes {
 	nodes := processNodes{}
 	for _, s := range sources {
 		nodes = append(nodes, p.Process(s))

@@ -73,6 +73,48 @@ func TestPipelineGraphSingle(t *testing.T) {
 	assert.Equal(t, []pipelines.Processor(nil), node.Consumers(), "Depth for a single node graph should be 0")
 }
 
+func TestPipelineGraphManyProcessesConsumes(t *testing.T) {
+	sourceA := make(chan interface{})
+	sourceB := make(chan interface{})
+	sourceC := make(chan interface{})
+	sourceD := make(chan interface{})
+
+	procD := createTestProcesser(sourceD)
+	procC := createTestProcesser(sourceC)
+	procB := createTestProcesser(sourceB)
+	procA := createTestProcesser(sourceA)
+
+	pipeline := pipelines.New()
+
+	pipeline.Processes(procD, procC).Consumes(procA, procB)
+
+	expectedDepth := map[pipelines.Processor]int{
+		procA: 0,
+		procB: 0,
+		procC: 1,
+		procD: 1,
+	}
+	expectedConsumer := map[pipelines.Processor][]pipelines.Processor{
+		procA: []pipelines.Processor{procD, procC},
+		procB: []pipelines.Processor{procD, procC},
+		procC: []pipelines.Processor(nil),
+		procD: []pipelines.Processor(nil),
+	}
+
+	graph, err := pipeline.Graph()
+	assert.NoError(t, err)
+
+	for k, node := range graph {
+		depth, ok := expectedDepth[k]
+		assert.Truef(t, ok, "Unknown processor %v", k)
+		assert.Equalf(t, depth, node.Depth(), "Values do not match. Got %q but expected %q at key %q", node.Depth(), depth, k)
+
+		consumers, ok := expectedConsumer[k]
+		assert.Truef(t, ok, "Unknown processor %v", k)
+		assert.Equalf(t, consumers, node.Consumers(), "Values do not match. Got %q but expected %q at key %q", node.Consumers(), consumers, k)
+	}
+}
+
 // A -> B -> C -> D
 func TestPipelineGraphSimple(t *testing.T) {
 	sourceA := make(chan interface{})
@@ -257,6 +299,37 @@ func TestPipelineRunManyProccessors(t *testing.T) {
 			return p.ProcessFuncInvoked
 		}, time.Second, 10*time.Millisecond, "Failed on process %d", i)
 	}
+}
+
+// A -> B -> C -> B
+func TestPipelineRunCycle(t *testing.T) {
+	sourceA := make(chan interface{})
+	sourceB := make(chan interface{})
+	sourceC := make(chan interface{})
+
+	procC := createTestProcesser(sourceC)
+	procB := createTestProcesser(sourceB)
+	procA := createTestProcesser(sourceA)
+
+	pipeline := pipelines.New()
+
+	pipeline.Process(procB).Consumes(procA)
+	pipeline.Process(procC).Consumes(procB)
+	pipeline.Process(procB).Consumes(procC)
+
+	err := pipeline.Run()
+	assert.Error(t, err, "Run should fail on a cycle")
+}
+
+func TestPipelineShutdownsEmpty(t *testing.T) {
+	source := make(chan interface{})
+
+	proc := createTestProcesser(source)
+
+	pipeline := pipelines.New()
+	pipeline.Process(proc).Consumes()
+
+	pipeline.Shutdown()
 }
 
 func TestPipelineShutdownsSingleProcessor(t *testing.T) {
