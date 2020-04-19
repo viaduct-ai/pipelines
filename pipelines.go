@@ -14,37 +14,42 @@ type Processor interface {
 	Exit()
 }
 
-type processNode struct {
-	pipeline  *pipeline
+// ProcessNode represents a node of the pipeline graph. It relates a Processor to its consumers and depth in a graph with respect to a Pipeline. A ProcessNode's referent to its pipeline allows for the synatic sugar of pipeline.Process(...).Consumers(...).
+type ProcessNode struct {
+	pipeline  *Pipeline
 	proc      Processor
 	consumers []Processor
 	depth     int
 }
 
-// Consumer provides read-only access to a pipeline processes consumers
-func (node *processNode) Consumers() []Processor {
+// Consumers provides read-only access to a pipeline processes consumers.
+func (node *ProcessNode) Consumers() []Processor {
 	return node.consumers
 }
 
-// Depth provides read-only access to a pipeline process' graph depth
-func (node *processNode) Depth() int {
+// Depth provides read-only access to a pipeline process' graph depth.
+func (node *ProcessNode) Depth() int {
 	return node.depth
 }
 
-func (node *processNode) addConsumer(proc Processor) {
+// addAsConsumer adds the process node as a consumer to another processor.
+func (node *ProcessNode) addAsConsumer(proc Processor) {
 	consumers := node.pipeline.Process(proc).consumers
 	node.pipeline.Process(proc).consumers = append(consumers, node.proc)
 }
 
-func (node *processNode) Consumes(others ...Processor) {
+// Consumes adds the node Processor as a consumer of other Processors.
+func (node *ProcessNode) Consumes(others ...Processor) {
 	for _, proc := range others {
-		node.addConsumer(proc)
+		node.addAsConsumer(proc)
 	}
 }
 
-type processNodes []*processNode
+// ProcessNodes allows of operations on slices of ProcessNodes.
+type ProcessNodes []*ProcessNode
 
-func (nodes processNodes) Consumes(others ...Processor) {
+// Consumes adds all the process nodes as consumers of the other Processors.
+func (nodes ProcessNodes) Consumes(others ...Processor) {
 	// Add p's source channel as a consumer of the other processes
 	for _, node := range nodes {
 		node.Consumes(others...)
@@ -58,21 +63,23 @@ type processGroup struct {
 	Cancel context.CancelFunc
 }
 
-// Pipeline contains a slice of Processors and a grouping to gracefully shutdown all of its Processors
-type pipeline struct {
-	processes map[Processor]*processNode
+// Pipeline contains a mapping of Processors to its graph metadata and a grouping to gracefully shutdown all of its Processors.
+type Pipeline struct {
+	processes map[Processor]*ProcessNode
 	groups    []*processGroup
 }
 
-func New() *pipeline {
-	processes := map[Processor]*processNode{}
+// New initialize an empty pipeline. A pipeline should always be initialized with this function.
+func New() *Pipeline {
+	processes := map[Processor]*ProcessNode{}
 
-	return &pipeline{
+	return &Pipeline{
 		processes: processes,
 	}
 }
 
-func (p *pipeline) Process(source Processor) *processNode {
+// Process returns a *ProcessNode for a given Processor. If the Processor doesn't exist in the Pipeline, a new node will be created for it and returned.
+func (p *Pipeline) Process(source Processor) *ProcessNode {
 	node, ok := p.processes[source]
 
 	// if it exists, return the pipeline process
@@ -81,7 +88,7 @@ func (p *pipeline) Process(source Processor) *processNode {
 	}
 
 	// else create it
-	node = &processNode{
+	node = &ProcessNode{
 		proc:     source,
 		pipeline: p,
 	}
@@ -90,18 +97,21 @@ func (p *pipeline) Process(source Processor) *processNode {
 	return node
 }
 
-func (p *pipeline) Processes(sources ...Processor) processNodes {
-	nodes := processNodes{}
+// Processes returns ProcessNodes for all inputted Processors. If any of the Processor don't exist in the Pipeline, a new node will be created for it and returned.
+func (p *Pipeline) Processes(sources ...Processor) ProcessNodes {
+	nodes := ProcessNodes{}
 	for _, s := range sources {
 		nodes = append(nodes, p.Process(s))
 	}
 	return nodes
 }
 
-// Graph returns a mapping from Processor to its maximum depth in any Process DAG (tree).
-// This graph representation of the pipeline is used to a graceful shutdown of every Processor.
-func (p *pipeline) Graph() (map[Processor]*processNode, error) {
-	for proc, _ := range p.processes {
+// Graph returns a mapping from Processor to its ProcessNode metadata.
+// This graph representation of the pipeline is used to:
+// 1. Maintain the relationships between Processor and the other Processors that care about their output (consumers).
+// 2. Gracefully shutdown of every Processor.
+func (p *Pipeline) Graph() (map[Processor]*ProcessNode, error) {
+	for proc := range p.processes {
 		visited := map[Processor]bool{}
 
 		err := p.addGraphNode(proc, 0, visited)
@@ -118,7 +128,7 @@ func (p *pipeline) Graph() (map[Processor]*processNode, error) {
 // are assigned to each processes according to its depth in the graph.
 // Each process is run in its own go routine.
 // An error is returned if there is a cycle detected in the pipeline graph (DAGs).
-func (p *pipeline) Run() error {
+func (p *Pipeline) Run() error {
 	graph, err := p.Graph()
 
 	if err != nil {
@@ -139,7 +149,7 @@ func (p *pipeline) Run() error {
 
 	// create run order and validate there are no unknown processes
 	// procedure depth
-	nodeGroups := make([]processNodes, maxDepth+1)
+	nodeGroups := make([]ProcessNodes, maxDepth+1)
 
 	for _, node := range graph {
 		nodeGroups[node.depth] = append(nodeGroups[node.depth], node)
@@ -164,7 +174,7 @@ func (p *pipeline) Run() error {
 
 // Shutdown gracefully shutdowns a pipeline in order of proccess groups.
 // Root processes will be shutdown first, then their consumers in a BFS order.
-func (p *pipeline) Shutdown() {
+func (p *Pipeline) Shutdown() {
 	if len(p.groups) == 0 {
 		log.Println("Pipeline is not running")
 		return
@@ -182,7 +192,7 @@ func (p *pipeline) Shutdown() {
 
 // addGraphNode recursively mutates the graph (map[Processor]int) mapping a Processor to its maximum depth
 // in a Processes tree (DAG).
-func (p *pipeline) addGraphNode(proc Processor, depth int, visited map[Processor]bool) error {
+func (p *Pipeline) addGraphNode(proc Processor, depth int, visited map[Processor]bool) error {
 	_, isCycle := visited[proc]
 
 	if isCycle {
