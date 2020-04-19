@@ -2,6 +2,7 @@ package pipelines_test
 
 import (
 	"errors"
+	"sync"
 	"testing"
 	"time"
 
@@ -21,19 +22,27 @@ type Processor struct {
 
 	ExitFunc        func()
 	ExitFuncInvoked bool
+
+	Mutex sync.Mutex
 }
 
 func (p *Processor) Source() chan interface{} {
+	p.Mutex.Lock()
+	defer p.Mutex.Unlock()
 	p.SourceFuncInvoked = true
 	return p.SourceFunc()
 }
 
 func (p *Processor) Process(i interface{}) (interface{}, error) {
+	p.Mutex.Lock()
+	defer p.Mutex.Unlock()
 	p.ProcessFuncInvoked = true
 	return p.ProcessFunc(i)
 }
 
 func (p *Processor) Exit() {
+	p.Mutex.Lock()
+	defer p.Mutex.Unlock()
 	p.ExitFuncInvoked = true
 	p.ExitFunc()
 }
@@ -248,6 +257,8 @@ func TestPipelineRunSingleProccessor(t *testing.T) {
 	assert.False(t, proc.ProcessFuncInvoked)
 	source <- "test"
 	assert.Eventuallyf(t, func() bool {
+		proc.Mutex.Lock()
+		defer proc.Mutex.Unlock()
 		return proc.ProcessFuncInvoked
 	}, time.Second, 10*time.Millisecond, "Proccess function was not invoked")
 }
@@ -284,6 +295,8 @@ func TestPipelineRunManyProccessors(t *testing.T) {
 	dagA := []*Processor{procA, procB, procC}
 	for i, p := range dagA {
 		assert.Eventuallyf(t, func() bool {
+			p.Mutex.Lock()
+			defer p.Mutex.Unlock()
 			return p.ProcessFuncInvoked
 		}, time.Second, 10*time.Millisecond, "Failed on process %d", i)
 		assert.Truef(t, p.ProcessFuncInvoked, "Failed on process %d", i)
@@ -296,6 +309,8 @@ func TestPipelineRunManyProccessors(t *testing.T) {
 	dagB := []*Processor{procD, procC}
 	for i, p := range dagB {
 		assert.Eventuallyf(t, func() bool {
+			p.Mutex.Lock()
+			defer p.Mutex.Unlock()
 			return p.ProcessFuncInvoked
 		}, time.Second, 10*time.Millisecond, "Failed on process %d", i)
 	}
@@ -403,6 +418,8 @@ func TestPipelineRunIgnoresEmptyEvents(t *testing.T) {
 
 	procA.Source() <- nil
 	assert.Eventuallyf(t, func() bool {
+		procA.Mutex.Lock()
+		defer procA.Mutex.Unlock()
 		return procA.ProcessFuncInvoked
 	}, time.Second, 10*time.Millisecond, "Proccess A function was not invoked")
 
@@ -438,6 +455,8 @@ func TestPipelineRunIgnoresErrors(t *testing.T) {
 	procA.Source() <- errors.New("error")
 
 	assert.Eventuallyf(t, func() bool {
+		procA.Mutex.Lock()
+		defer procA.Mutex.Unlock()
 		return procA.ProcessFuncInvoked
 	}, time.Second, 10*time.Millisecond, "Proccess A function was not invoked")
 
