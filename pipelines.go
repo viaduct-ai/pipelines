@@ -14,55 +14,6 @@ type Processor interface {
 	Exit()
 }
 
-// ProcessNode represents a node of the pipeline graph. It relates a Processor to its consumers and depth in a graph with respect to a Pipeline. A ProcessNode's referent to its pipeline allows for the synatic sugar of pipeline.Process(...).Consumers(...).
-type ProcessNode struct {
-	pipeline  *Pipeline
-	proc      Processor
-	consumers []Processor
-	depth     int
-}
-
-// Consumers provides read-only access to a pipeline processes consumers.
-func (node *ProcessNode) Consumers() []Processor {
-	return node.consumers
-}
-
-// Depth provides read-only access to a pipeline process' graph depth.
-func (node *ProcessNode) Depth() int {
-	return node.depth
-}
-
-// addAsConsumer adds the process node as a consumer to another processor.
-func (node *ProcessNode) addAsConsumer(proc Processor) {
-	consumers := node.pipeline.Process(proc).consumers
-	node.pipeline.Process(proc).consumers = append(consumers, node.proc)
-}
-
-// Consumes adds the node Processor as a consumer of other Processors.
-func (node *ProcessNode) Consumes(others ...Processor) {
-	for _, proc := range others {
-		node.addAsConsumer(proc)
-	}
-}
-
-// ProcessNodes allows of operations on slices of ProcessNodes.
-type ProcessNodes []*ProcessNode
-
-// Consumes adds all the process nodes as consumers of the other Processors.
-func (nodes ProcessNodes) Consumes(others ...Processor) {
-	// Add p's source channel as a consumer of the other processes
-	for _, node := range nodes {
-		node.Consumes(others...)
-	}
-}
-
-// processGroup contains information to run and shutdown a group of Processors
-type processGroup struct {
-	Ctx    context.Context
-	WG     *sync.WaitGroup
-	Cancel context.CancelFunc
-}
-
 // Pipeline contains a mapping of Processors to its graph metadata and a grouping to gracefully shutdown all of its Processors.
 type Pipeline struct {
 	processes map[Processor]*ProcessNode
@@ -229,9 +180,17 @@ func (p *Pipeline) addGraphNode(proc Processor, depth int, visited map[Processor
 // On cancellation, the Processor's Exit handler is called before closing its Source.
 func runProc(ctx context.Context, wg *sync.WaitGroup, p Processor, consumers []Processor) {
 	defer wg.Done()
+
+	// initialize before the for select
+	source := p.Source()
+	consumerChans := make([]chan interface{}, len(consumers))
+	for _, c := range consumers {
+		consumerChans = append(consumerChans, c.Source())
+	}
+
 	for {
 		select {
-		case e := <-p.Source():
+		case e := <-source:
 			out, err := p.Process(e)
 
 			// log and ignore errors
@@ -245,8 +204,8 @@ func runProc(ctx context.Context, wg *sync.WaitGroup, p Processor, consumers []P
 				continue
 			}
 
-			for _, c := range consumers {
-				c.Source() <- out
+			for _, c := range consumerChans {
+				c <- out
 			}
 
 		case <-ctx.Done():
@@ -257,16 +216,5 @@ func runProc(ctx context.Context, wg *sync.WaitGroup, p Processor, consumers []P
 			log.Println("Closed source channel")
 			return
 		}
-	}
-}
-
-// newProcessGroup returns a new process group from a parent context
-func newProcessGroup(parent context.Context) *processGroup {
-	ctx, cancel := context.WithCancel(parent)
-	wg := &sync.WaitGroup{}
-	return &processGroup{
-		Ctx:    ctx,
-		Cancel: cancel,
-		WG:     wg,
 	}
 }

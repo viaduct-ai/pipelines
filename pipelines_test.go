@@ -16,12 +16,15 @@ import (
 type Processor struct {
 	SourceFunc        func() chan interface{}
 	SourceFuncInvoked bool
+	SourceFuncCount   int
 
 	ProcessFunc        func(interface{}) (interface{}, error)
 	ProcessFuncInvoked bool
+	ProcessFuncCount   int
 
 	ExitFunc        func()
 	ExitFuncInvoked bool
+	ExitFuncCount   int
 
 	Mutex sync.Mutex
 }
@@ -30,6 +33,7 @@ func (p *Processor) Source() chan interface{} {
 	p.Mutex.Lock()
 	defer p.Mutex.Unlock()
 	p.SourceFuncInvoked = true
+	p.SourceFuncCount = p.SourceFuncCount + 1
 	return p.SourceFunc()
 }
 
@@ -37,6 +41,7 @@ func (p *Processor) Process(i interface{}) (interface{}, error) {
 	p.Mutex.Lock()
 	defer p.Mutex.Unlock()
 	p.ProcessFuncInvoked = true
+	p.ProcessFuncCount = p.ProcessFuncCount + 1
 	return p.ProcessFunc(i)
 }
 
@@ -44,6 +49,7 @@ func (p *Processor) Exit() {
 	p.Mutex.Lock()
 	defer p.Mutex.Unlock()
 	p.ExitFuncInvoked = true
+	p.ExitFuncCount = p.ExitFuncCount + 1
 	p.ExitFunc()
 }
 
