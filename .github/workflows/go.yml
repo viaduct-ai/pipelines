@@ -1,0 +1,52 @@
+name: Lint and Test
+
+on: [push]
+
+env:
+  CI: true
+  GO111MODULE: on
+  GOPROXY: https://proxy.golang.org
+
+jobs:
+  test:
+    strategy:
+      matrix:
+        os: [ubuntu-latest]
+        go: [1.13, 1.14]
+    name: ${{ matrix.os }} @ Go ${{ matrix.go }}
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Set up Go ${{ matrix.go }}
+        uses: actions/setup-go@v1
+        with:
+          go-version: ${{ matrix.go }}
+
+      - name: Checkout code
+        uses: actions/checkout@v2
+
+      - name: Set GOPATH and PATH
+        shell: bash
+        run: |
+          echo "::set-env name=GOPATH::$(dirname $GITHUB_WORKSPACE)"
+          echo "::add-path::$(dirname $GITHUB_WORKSPACE)/bin"
+
+      - name: Install dependencies
+        run: |
+          go mod download
+          go mod tidy
+      - name: Run golint
+        run: |
+          go get -t -v golang.org/x/lint/golint
+          golint -set_exit_status ./...
+      - name: Run gofmt
+        run: |
+          diff -u <(echo -n) <(gofmt -d -e .)
+      - name: Run go vet
+        run: |
+          go vet -v ./...
+      - name: Run unit tests
+        run: |
+          go test -v -race -covermode=atomic -coverprofile=coverage.out ./...
+      - name: Build binary
+        run: |
+          go build

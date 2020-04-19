@@ -449,5 +449,3 @@ func TestPipelineRunIgnoresErrors(t *testing.T) {
 	}
 	pipeline.Shutdown()
 }
-
-// benchmark for fun?
