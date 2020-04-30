@@ -28,6 +28,7 @@ func (p *standardProcess) Exit() {
 	p.exit()
 }
 
+// New returns a stateless pipelines.Processor. It is intended as a helper for creating functional pipeline Processor's. A process function is required, but the exit function is option.
 func New(process func(interface{}) (interface{}, error), exit func()) (pipelines.Processor, error) {
 	if process == nil {
 		return nil, errors.New("process func is required")
@@ -40,7 +41,11 @@ func New(process func(interface{}) (interface{}, error), exit func()) (pipelines
 	}, nil
 }
 
+// NewTicker decorates a pipelines.Processor by starting a time.Ticker to a passes a value to the Processor's source channel on the given interval. This is often useful for triggering a root pipeline processor on a given interval, such as polling for new events every 10 seconds.
 func NewTicker(proc pipelines.Processor, interval time.Duration) (pipelines.Processor, error) {
+	if proc == nil || proc.Source() == nil {
+		return nil, errors.New("processor must not have a nil Source")
+	}
 	if interval <= 0 {
 		return nil, errors.New("interval must be greater than 0")
 	}
