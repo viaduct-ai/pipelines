@@ -184,8 +184,9 @@ func runProc(ctx context.Context, wg *sync.WaitGroup, p Processor, consumers []P
 	// initialize before the for select
 	source := p.Source()
 	consumerChans := make([]chan interface{}, len(consumers))
-	for _, c := range consumers {
-		consumerChans = append(consumerChans, c.Source())
+
+	for i, c := range consumers {
+		consumerChans[i] = c.Source()
 	}
 
 	for {

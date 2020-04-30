@@ -297,7 +297,7 @@ func TestPipelineRunManyProccessors(t *testing.T) {
 	}
 
 	// send a event through one of the pipeline dags
-	sourceA <- "test"
+	sourceA <- "A"
 	dagA := []*Processor{procA, procB, procC}
 	for i, p := range dagA {
 		assert.Eventuallyf(t, func() bool {
@@ -305,13 +305,12 @@ func TestPipelineRunManyProccessors(t *testing.T) {
 			defer p.Mutex.Unlock()
 			return p.ProcessFuncInvoked
 		}, time.Second, 10*time.Millisecond, "Failed on process %d", i)
-		assert.Truef(t, p.ProcessFuncInvoked, "Failed on process %d", i)
 	}
 	// explicitly reset procC false
 	procC.ProcessFuncInvoked = false
 
 	// send a event through the other pipeline dag
-	sourceD <- "test"
+	sourceD <- "B"
 	dagB := []*Processor{procD, procC}
 	for i, p := range dagB {
 		assert.Eventuallyf(t, func() bool {
