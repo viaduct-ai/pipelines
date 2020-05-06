@@ -41,17 +41,14 @@ func New(process func(interface{}) (interface{}, error), exit func()) (pipelines
 	}, nil
 }
 
-// NewTicker decorates a pipelines.Processor by starting a time.Ticker to a passes a value to the Processor's source channel on the given interval. This is often useful for triggering a root pipeline processor on a given interval, such as polling for new events every 10 seconds.
-func NewTicker(proc pipelines.Processor, interval time.Duration) (pipelines.Processor, error) {
-	if proc == nil || proc.Source() == nil {
-		return nil, errors.New("processor must not have a nil Source")
-	}
+// NewTicker starts a time.Ticker to populate its own source channel on the given interval. This is often useful for triggering a consumer pipeline processor on a given interval, such as polling for new events every 10 seconds.
+func NewTicker(interval time.Duration) (pipelines.Processor, error) {
 	if interval <= 0 {
 		return nil, errors.New("interval must be greater than 0")
 	}
 
 	tProc := &tickerProcess{
-		proc:   proc,
+		source: make(chan interface{}),
 		ticker: time.NewTicker(interval),
 		done:   make(chan bool),
 	}
@@ -61,33 +58,31 @@ func NewTicker(proc pipelines.Processor, interval time.Duration) (pipelines.Proc
 }
 
 type tickerProcess struct {
-	proc   pipelines.Processor
+	source chan interface{}
 	ticker *time.Ticker
 	done   chan bool
 }
 
 func (p *tickerProcess) start() {
-	source := p.proc.Source()
 	for {
 		select {
 		case <-p.done:
 			return
 		case t := <-p.ticker.C:
-			source <- t
+			p.source <- t
 		}
 	}
 }
 
 func (p *tickerProcess) Source() chan interface{} {
-	return p.proc.Source()
+	return p.source
 }
 
 func (p *tickerProcess) Process(i interface{}) (interface{}, error) {
-	return p.proc.Process(i)
+	return i, nil
 }
 
 func (p *tickerProcess) Exit() {
 	p.done <- true
 	p.ticker.Stop()
-	p.proc.Exit()
 }

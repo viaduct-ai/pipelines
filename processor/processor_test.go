@@ -58,15 +58,10 @@ func TestNewProcessor(t *testing.T) {
 }
 
 func TestNewTickerProcessorRequiresPositiveInterval(t *testing.T) {
-	test := &testProcess{}
-
-	proc, err := processor.New(test.process, test.exit)
-	assert.NoError(t, err)
-
-	_, err = processor.NewTicker(proc, -1*time.Millisecond)
+	_, err := processor.NewTicker(-1 * time.Millisecond)
 	assert.Error(t, err)
 
-	_, err = processor.NewTicker(proc, 0*time.Millisecond)
+	_, err = processor.NewTicker(0 * time.Millisecond)
 	assert.Error(t, err)
 }
 
@@ -77,12 +72,12 @@ func TestNewTickerProcessor(t *testing.T) {
 	proc, err := processor.New(test.process, test.exit)
 	assert.NoError(t, err)
 
-	tickerProc, err := processor.NewTicker(proc, interval)
+	tickerProc, err := processor.NewTicker(interval)
 	assert.NoError(t, err)
 
 	pipeline := pipelines.New()
 
-	pipeline.Process(tickerProc)
+	pipeline.Process(proc).Consumes(tickerProc)
 
 	err = pipeline.Run()
 	assert.NoError(t, err)
