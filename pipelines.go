@@ -195,6 +195,7 @@ func runProc(ctx context.Context, wg *sync.WaitGroup, p Processor, consumers []P
 			// set  to nil if the channel is closed
 			if !ok {
 				source = nil
+				continue
 			}
 			out, err := p.Process(e)
 
