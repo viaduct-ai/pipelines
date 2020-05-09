@@ -218,7 +218,9 @@ func runProc(ctx context.Context, wg *sync.WaitGroup, p Processor, consumers []P
 			log.Println("Received cancellation signal")
 			p.Exit()
 			log.Println("Exited")
-			close(p.Source())
+			if source != nil {
+				close(source)
+			}
 			log.Println("Closed source channel")
 			return
 		}
