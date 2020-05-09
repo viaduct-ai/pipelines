@@ -191,7 +191,11 @@ func runProc(ctx context.Context, wg *sync.WaitGroup, p Processor, consumers []P
 
 	for {
 		select {
-		case e := <-source:
+		case e, ok := <-source:
+			// set  to nil if the channel is closed
+			if !ok {
+				source = nil
+			}
 			out, err := p.Process(e)
 
 			// log and ignore errors
