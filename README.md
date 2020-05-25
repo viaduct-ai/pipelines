@@ -38,6 +38,33 @@ type GithubStatus struct {
   Indicator string `json:"indicator"`
 }
 
+func main() {
+  minuteTicker, err := processor.NewTicker(time.Minute)
+  getGithuStatusProc, err := processor.New(getGithubStatus, nil)
+  githubOutages, err := processor.New(filterForOutages, nil)
+  slackAlertProc, err := processor.New(slackAlert, nil)
+  emailAlertProc, err := processor.New(emailAlert, nil)
+
+  pipeline := pipelines.New()
+
+  // Get Github's status every minute
+  pipeline.Process(getGithubStatusProc).Consumes(minuteTicker)
+  // Check Github status for outages
+  pipeline.Process(githubOutages).Consumes(getGithubStatusProc)
+  // Slack & Email alerts consume Github outage events
+  pipeline.Processes(slackAlert, emailAlert).Consumes(githubOutages)
+
+  // Start the pipeline
+  pipeline.Run()
+
+	// Wait for a termination signal
+	sigs := make(chan os.Signal, 1)
+	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
+	<-sigs
+
+	// Gracefully shutdown all processes in the Pipeline
+  pipeline.Shutdown()
+}
 
 func getGithubStatus(i interface{}) (interface{}, error) {
   var result GithubStatusAPIResp
@@ -116,30 +143,6 @@ func emailAlert(i interface{})(interface{}, error){
   return nil, err
 }
 
-func main() {
-  minuteTicker, err := processor.NewTicker(time.Minute)
-  getGithuStatusProc, err := processor.New(getGithubStatus, nil)
-  githubOutages, err := processor.New(filterForOutages, nil)
-  slackAlertProc, err := processor.New(slackAlert, nil)
-  emailAlertProc, err := processor.New(emailAlert, nil)
-
-  pipeline := pipelines.New()
-
-  pipeline.Process(getGithubStatusProc).Consumes(minuteTicker)
-  pipeline.Process(githubOutages).Consumes(getGithubStatusProc)
-  pipeline.Processes(slackAlert, emailAlert).Consumes(githubOutages)
-
-  // Start the pipeline
-  pipeline.Run()
-
-	// Wait for a termination signal
-	sigs := make(chan os.Signal, 1)
-	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
-	<-sigs
-
-	// Gracefully shutdown all processes in the Pipeline
-  pipeline.Shutdown()
-}
 
 ```
 
