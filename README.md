@@ -57,12 +57,12 @@ func main() {
   // Start the pipeline
   pipeline.Run()
 
-	// Wait for a termination signal
-	sigs := make(chan os.Signal, 1)
-	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
-	<-sigs
+  // Wait for a termination signal
+  sigs := make(chan os.Signal, 1)
+  signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
+  <-sigs
 
-	// Gracefully shutdown all processes in the Pipeline
+  // Gracefully shutdown all processes in the Pipeline
   pipeline.Shutdown()
 }
 
