@@ -134,11 +134,11 @@ func emailAlert(i interface{})(interface{}, error){
 		"mail.example.com",
 	)
 
-	to := []string{"engineering@viaduct.ai"}
-	msg := []byte(
-		"Subject: Expect Issues with Github\r\n" +
-		"Github is down. Go home.")
-	err := smtp.SendMail(		"mail.example.com:25", auth, "sender@example.org", to, msg)
+  to := []string{"engineering@viaduct.ai"}
+  msg := []byte(
+	  "Subject: Expect Issues with Github\r\n" +
+	  "Github is down. Go home.")
+  err := smtp.SendMail("mail.example.com:25", auth, "sender@example.org", to, msg)
 
   return nil, err
 }
