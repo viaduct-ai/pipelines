@@ -29,13 +29,13 @@ func (p *standardProcess) Exit() {
 }
 
 // New returns a stateless pipelines.Processor. It is intended as a helper for creating functional pipeline Processor's. A process function is required, but the exit function is option.
-func New(process func(interface{}) (interface{}, error), exit func()) (pipelines.Processor, error) {
+func New(process func(interface{}) (interface{}, error), exit func(), bufferSize int) (pipelines.Processor, error) {
 	if process == nil {
 		return nil, errors.New("process func is required")
 	}
 
 	return &standardProcess{
-		source:  make(chan interface{}),
+		source:  make(chan interface{}, bufferSize),
 		process: process,
 		exit:    exit,
 	}, nil

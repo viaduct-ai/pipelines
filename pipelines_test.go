@@ -201,10 +201,10 @@ func TestPipelineGraphComplex(t *testing.T) {
 		procD: 0,
 	}
 	expectedConsumer := map[pipelines.Processor][]pipelines.Processor{
-		procA: []pipelines.Processor{procB},
-		procB: []pipelines.Processor{procC},
+		procA: {procB},
+		procB: {procC},
 		procC: []pipelines.Processor(nil),
-		procD: []pipelines.Processor{procC},
+		procD: {procC},
 	}
 
 	graph, err := pipeline.Graph()
