@@ -40,10 +40,10 @@ type GithubStatus struct {
 
 func main() {
   minuteTicker, err := processor.NewTicker(time.Minute)
-  getGithuStatusProc, err := processor.New(getGithubStatus, nil)
-  githubOutages, err := processor.New(filterForOutages, nil)
-  slackAlertProc, err := processor.New(slackAlert, nil)
-  emailAlertProc, err := processor.New(emailAlert, nil)
+  getGithuStatusProc, err := processor.New(getGithubStatus, nil, 0)
+  githubOutages, err := processor.New(filterForOutages, nil, 0)
+  slackAlertProc, err := processor.New(slackAlert, nil, 0)
+  emailAlertProc, err := processor.New(emailAlert, nil, 0)
 
   pipeline := pipelines.New()
 
