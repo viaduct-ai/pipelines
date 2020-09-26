@@ -28,7 +28,7 @@ func (p *testProcess) exit() {
 }
 
 func TestNewProcessorRequireProcessFunc(t *testing.T) {
-	_, err := processor.New(nil, nil)
+	_, err := processor.New(nil, nil, 0)
 	assert.Error(t, err)
 }
 
@@ -36,7 +36,7 @@ func TestNewProcessor(t *testing.T) {
 	test := &testProcess{}
 	expected := "test"
 
-	proc, err := processor.New(test.process, test.exit)
+	proc, err := processor.New(test.process, test.exit, 0)
 	assert.NoError(t, err)
 
 	pipeline := pipelines.New()
@@ -69,7 +69,7 @@ func TestNewTickerProcessor(t *testing.T) {
 	test := &testProcess{}
 	interval := time.Millisecond
 
-	proc, err := processor.New(test.process, test.exit)
+	proc, err := processor.New(test.process, test.exit, 0)
 	assert.NoError(t, err)
 
 	tickerProc, err := processor.NewTicker(interval)
